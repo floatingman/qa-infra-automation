@@ -1,0 +1,132 @@
+---
+- name: Uninstall Rancher from RKE2 Cluster using Helm
+  hosts: bastion
+  become: true
+  gather_facts: true
+
+  vars:
+    # Enable Rancher uninstall
+    uninstall_rancher: true
+    uninstall_helm: true
+
+    # Rancher configuration (matching role defaults)
+    rancher_namespace: "cattle-system"
+    create_backup: true
+    remove_namespace: true
+    remove_cert_manager: true
+    force_uninstall: false
+
+  pre_tasks:
+    - name: Check if kubectl is available
+      ansible.builtin.stat:
+        path: "/home/{{ ansible_user }}/.kube/config"
+      register: kubectl_config
+
+    - name: Fail if kubectl is not configured
+      ansible.builtin.fail:
+        msg: |
+          kubectl is not configured on the bastion node.
+          Please run the kubectl setup playbook first:
+          ansible-playbook -i inventory/inventory.yml playbooks/setup/setup-kubectl-access.yml
+      when: not kubectl_config.stat.exists
+
+    - name: Test kubectl connectivity to RKE2 cluster
+      ansible.builtin.command: kubectl get nodes
+      register: kubectl_nodes
+      changed_when: false
+      environment:
+        KUBECONFIG: "/home/{{ ansible_user }}/.kube/config"
+      become_user: "{{ ansible_user }}"
+
+    - name: Display cluster nodes
+      ansible.builtin.debug:
+        msg: "RKE2 cluster nodes: {{ kubectl_nodes.stdout_lines }}"
+
+    - name: Check if python3-pip is already installed
+      ansible.builtin.command: python3 -m pip --version
+      register: pip_check
+      changed_when: false
+      failed_when: false
+
+    - name: Install pip3 if not present
+      ansible.builtin.package:
+        name: python3-pip
+        state: present
+      when: pip_check.rc != 0
+      ignore_errors: true
+
+    - name: Install Ansible and required packages
+      ansible.builtin.package:
+        name:
+          - ansible
+          - python3-kubernetes
+          - python3-yaml
+        state: present
+      ignore_errors: true
+
+    - name: Install Ansible Kubernetes collection if not present
+      ansible.builtin.command: ansible-galaxy collection install kubernetes.core
+      register: collection_install
+      failed_when: collection_install.rc != 0 and 'already satisfied' not in collection_install.stderr
+      changed_when: collection_install.rc == 0 and 'already satisfied' not in collection_install.stderr
+
+  roles:
+    - role: rancher_helm_uninstall
+      tags:
+        - rancher
+        - helm
+        - uninstall
+
+  post_tasks:
+    - name: Verify Rancher namespace is removed
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ rancher_namespace }}"
+        kubeconfig: "/home/{{ ansible_user }}/.kube/config"
+      register: namespace_check
+      failed_when: false
+
+    - name: Display uninstall verification
+      ansible.builtin.debug:
+        msg: |
+          ========================================
+          Rancher Uninstall Verification
+          ========================================
+          Namespace {{ rancher_namespace }} exists: {{ namespace_check.resources | length > 0 }}
+          Rancher pods remaining: {{ rancher_pods_check.resources | length if rancher_pods_check.resources is defined else 0 }}
+          ========================================
+
+    - name: Create uninstall summary
+      ansible.builtin.copy:
+        content: |
+          # Rancher Uninstall Summary
+          Uninstall Date: {{ ansible_date_time.iso8601 }}
+          Namespace: {{ rancher_namespace }}
+          Backup Created: {{ create_backup | default(true) }}
+          {% if create_backup | default(true) %}
+          Backup Location: {{ backup_path }}
+          {% endif %}
+          Namespace Removed: {{ remove_namespace | default(true) }}
+          cert-manager Removed: {{ remove_cert_manager | default(true) }}
+          Force Uninstall: {{ force_uninstall | default(false) }}
+
+          Status: Successfully uninstalled Rancher from RKE2 cluster
+
+          Next Steps:
+          1. Review backup files if needed
+          2. Redeploy Rancher using: ansible-playbook -i inventory/inventory.yml playbooks/deploy/rancher-helm-deploy-playbook.yml
+          3. Or deploy a different version by updating rancher_image_tag in inventory/group_vars/all.yml
+        dest: "/home/{{ ansible_user }}/rancher-uninstall-summary.txt"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+
+    - name: Display uninstall completion
+      ansible.builtin.debug:
+        msg: |
+          ========================================
+          Rancher Uninstall Complete!
+          ========================================
+          Summary saved to: /home/{{ ansible_user }}/rancher-uninstall-summary.txt
+          ========================================

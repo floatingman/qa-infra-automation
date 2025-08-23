@@ -1,0 +1,25 @@
+---
+# Default configuration for Rancher uninstall via Helm
+
+# Deployment control
+uninstall_rancher: true
+uninstall_helm: false
+
+# Kubectl configuration
+kubeconfig_path: "/home/{{ ansible_user }}/.kube/config"
+
+# Rancher configuration
+rancher_namespace: "cattle-system"
+
+# Helm configuration
+helm_version: "v3.12.3"
+
+# Uninstall options
+force_uninstall: false
+remove_namespace: true
+remove_cert_manager: true
+remove_helm_repos: true
+
+# Backup options
+create_backup: true
+backup_path: "/home/{{ ansible_user }}/rancher-backup-{{ ansible_date_time.iso8601 }}.yaml"
