@@ -32,6 +32,8 @@ rancher_helm_values:
   ingress:
     tls:
       source: "{{ rancher_tls_source }}"
+  # Airgap registry configuration - override with private_registry_url variable
+  systemDefaultRegistry: "{{ private_registry_url | default('') }}"
 
 # Advanced configuration
 rancher_advanced_values: {}

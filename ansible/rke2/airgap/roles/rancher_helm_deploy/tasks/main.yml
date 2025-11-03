@@ -83,6 +83,15 @@
         create_namespace: true
         values:
           installCRDs: true
+          # Use private registry in airgap environments
+          image:
+            repository: "{{ (private_registry_url + '/quay.io/jetstack/cert-manager-controller') if private_registry_url is defined and private_registry_url else 'quay.io/jetstack/cert-manager-controller' }}"
+          webhook:
+            image:
+              repository: "{{ (private_registry_url + '/quay.io/jetstack/cert-manager-webhook') if private_registry_url is defined and private_registry_url else 'quay.io/jetstack/cert-manager-webhook' }}"
+          cainjector:
+            image:
+              repository: "{{ (private_registry_url + '/quay.io/jetstack/cert-manager-cainjector') if private_registry_url is defined and private_registry_url else 'quay.io/jetstack/cert-manager-cainjector' }}"
         kubeconfig: "{{ kubeconfig_path }}"
       when: rancher_tls_source == "letsEncrypt" or rancher_tls_source == "rancher"
 
