@@ -82,7 +82,7 @@
 
   vars:
     # Enable RKE2 installation
-    target_group: "{{ target | default('rancher') }}"
+    target_group: "{{ target | default('airgap_nodes') }}"
     enable_rke2_installation: true
 
   pre_tasks:
@@ -185,7 +185,7 @@
   become: true
   gather_facts: true
   vars:
-    target_group: "{{ target | default('rancher') }}"
+    target_group: "{{ target | default('rke2_servers') }}"
 
   tasks:
     - name: Extract Kubernetes version from RKE2 version
