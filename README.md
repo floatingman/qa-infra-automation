@@ -26,6 +26,8 @@ Full RKE2 cluster + Rancher on AWS in three commands:
 make all    # provisions infra → deploys RKE2 → installs Rancher
 ```
 
+After `make all` completes, `kubectl get nodes` works immediately — the kubeconfig is configured on your workstation automatically.
+
 For an airgap deployment: `make all ENV=airgap`. For K3s: `make all DISTRO=k3s`.
 
 See [prerequisites](docs/prerequisites.md) first.

@@ -264,3 +264,17 @@
         (k3s_pods_check.resources | rejectattr('status.phase', 'in', ['Running', 'Succeeded']) | list | length == 0)
       retries: 5
       delay: 60
+
+- hosts: localhost
+  name: Configure local kubectl access
+  connection: local
+  gather_facts: false
+  vars_files: [vars.yaml]
+  tasks:
+    - name: Setup local kubeconfig
+      ansible.builtin.include_tasks: "{{ playbook_dir | dirname | dirname }}/tasks/setup-local-kubeconfig.yml"
+      vars:
+        kubeconfig_src: "{{ kubeconfig_file }}"
+        kubeconfig_local_mode: "{{ kubeconfig_local_mode | default('copy') }}"
+        kubeconfig_context_name: "{{ kubeconfig_context_name | default(omit) }}"
+      tags: ['kubeconfig', 'k3s']

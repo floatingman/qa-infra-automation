@@ -82,6 +82,10 @@ vim vars.yaml
 # K3s version and installation
 kubernetes_version: 'v1.33.1+k3s1'
 kubeconfig_file: './kubeconfig.yaml'
+
+# Kubeconfig setup after cluster creation
+kubeconfig_local_mode: 'copy'           # copy | merge | skip
+# kubeconfig_context_name: 'k3s-dev'   # Used when mode is "merge"
 ```
 
 ### Registry Support

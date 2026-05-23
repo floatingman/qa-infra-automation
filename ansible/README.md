@@ -37,6 +37,16 @@ Many tasks run on `localhost` (the control node) against the remote cluster,
 so these Python libraries must be present in the interpreter that runs
 `ansible-playbook`, not on the managed hosts.
 
+## Shared Task Files
+
+Reusable task files in `tasks/` can be included by any playbook:
+
+| Task File | Description |
+|-----------|-------------|
+| `tasks/setup-local-kubeconfig.yml` | Configures kubectl on the operator's workstation after cluster creation. Supports `copy` (default), `merge`, and `skip` modes via `kubeconfig_local_mode`. |
+| `tasks/teardown-local-kubeconfig.yml` | Removes the cluster context from `~/.kube/config` during infrastructure teardown. Reads `.kubeconfig-state` to determine mode and context name. |
+| `tasks/download-kubectl.yml` | Downloads and installs the kubectl binary with SHA256 verification. |
+
 ## Building for GO
 
 Package ansible provides embedded Ansible playbooks, roles, and configuration

@@ -9,6 +9,8 @@ All configurable variables across playbooks and roles. Variables are set in `var
 | `kubernetes_version` | Yes | — | RKE2 version (e.g., `v1.34.2+rke2r1`). See [releases](https://github.com/rancher/rke2/releases). |
 | `cni` | Yes | — | CNI plugin: `calico`, `canal`, or `cilium` |
 | `kubeconfig_file` | No | `./kubeconfig.yaml` | Local path to save the kubeconfig |
+| `kubeconfig_local_mode` | No | `copy` | How to configure local kubectl: `copy` (overwrite `~/.kube/config`), `merge` (add as a named context), or `skip` (do nothing) |
+| `kubeconfig_context_name` | No | `rke2-<filename>` | Context name used when `kubeconfig_local_mode` is `merge` |
 | `channel` | No | `stable` | RKE2 release channel: `stable`, `latest`, `testing` |
 | `install_method` | No | `online` | Installation method: `online` or `airgap` |
 | `server_flags` | No | — | Extra YAML config for server nodes (written to `/etc/rancher/rke2/config.yaml`) |
@@ -32,6 +34,8 @@ All configurable variables across playbooks and roles. Variables are set in `var
 |----------|----------|---------|-------------|
 | `kubernetes_version` | Yes | — | K3s version (e.g., `v1.35.2+k3s1`). See [releases](https://github.com/k3s-io/k3s/releases). |
 | `kubeconfig_file` | No | `./kubeconfig.yaml` | Local path to save the kubeconfig |
+| `kubeconfig_local_mode` | No | `copy` | How to configure local kubectl: `copy` (overwrite `~/.kube/config`), `merge` (add as a named context), or `skip` (do nothing) |
+| `kubeconfig_context_name` | No | `k3s-<filename>` | Context name used when `kubeconfig_local_mode` is `merge` |
 | `channel` | No | `stable` | K3s release channel: `stable`, `latest`, `testing` |
 | `server_flags` | No | — | Extra YAML config for server nodes |
 | `worker_flags` | No | — | Extra YAML config for agent nodes |

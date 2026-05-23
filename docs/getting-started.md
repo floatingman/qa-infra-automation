@@ -69,6 +69,15 @@ Or go straight to the [guide index](guides/README.md).
 
 ## What's Next After the Cluster?
 
+After deploying a cluster, the playbook automatically configures kubectl access on your workstation by copying the kubeconfig to `~/.kube/config`. You can immediately run:
+
+```bash
+kubectl get nodes
+kubectl get pods -A
+```
+
+If you manage multiple clusters, set `kubeconfig_local_mode: "merge"` in `vars.yaml` to add the new cluster as a named context instead of overwriting your existing config. See the [Variables Reference](reference/variables.md) for details.
+
 - [Install Rancher](guides/rancher-ha.md) for cluster management
 - [Import a downstream cluster](import_cluster_on_airgap.md) into an airgapped Rancher
 

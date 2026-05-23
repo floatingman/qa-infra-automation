@@ -115,11 +115,54 @@ ansible-playbook \
 
 ## Step 4: Verify
 
+By default, the playbook copies the kubeconfig to `~/.kube/config` so you can use `kubectl` directly:
+
 ```bash
-kubectl --kubeconfig ansible/k3s/default/kubeconfig.yaml get nodes -o wide
+kubectl get nodes -o wide
 ```
 
 All nodes should show `Ready`.
+
+<details>
+<summary>Kubeconfig not working? Alternatives</summary>
+
+If you prefer not to modify `~/.kube/config`, the kubeconfig is also saved at the playbook location:
+
+```bash
+kubectl --kubeconfig ansible/k3s/default/kubeconfig.yaml get nodes
+```
+
+Or export it as an environment variable:
+
+```bash
+export KUBECONFIG=ansible/k3s/default/kubeconfig.yaml
+kubectl get nodes
+```
+
+</details>
+
+### Multi-cluster setup
+
+If you manage multiple clusters, set `kubeconfig_local_mode` in `vars.yaml` to merge the new context alongside your existing ones:
+
+```yaml
+kubeconfig_local_mode: "merge"             # Merges into ~/.kube/config
+kubeconfig_context_name: "k3s-my-cluster"  # Optional: friendly name for the context
+```
+
+### Cleaning up
+
+When you tear down the cluster, the context is automatically removed:
+
+```bash
+make infra-down DISTRO=k3s
+```
+
+To remove just the context without destroying infrastructure:
+
+```bash
+make kubeconfig-cleanup DISTRO=k3s
+```
 
 ## Step 5: (Optional) Deploy Rancher
 

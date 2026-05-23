@@ -28,10 +28,10 @@ make all DISTRO=k3s ENV=default PROVIDER=aws
 | `make infra-init` | Initialize Tofu (download providers) |
 | `make infra-plan` | Preview infrastructure changes |
 | `make infra-up` | Create infrastructure and generate Ansible inventory |
-| `make infra-down` | Destroy infrastructure (with confirmation prompt) |
+| `make infra-down` | Destroy infrastructure and clean up local kubeconfig (with confirmation prompt) |
 | `make infra-output` | Show Tofu outputs |
 | `make infra-ls` | List all active infrastructure across all modules/workspaces |
-| `make infra-nuke` | Destroy ALL active infrastructure (end-of-day cleanup) |
+| `make infra-nuke` | Destroy ALL active infrastructure and clean up all kubeconfigs (end-of-day cleanup) |
 
 ### Cluster Deployment (Ansible)
 
@@ -54,7 +54,8 @@ make all DISTRO=k3s ENV=default PROVIDER=aws
 | `make ping` | Ansible ping all hosts |
 | `make validate` | Check all prerequisites and configuration |
 | `make verify` | Verify supply chain integrity (version pins, lock files) |
-| `make clean` | Remove local temporary files |
+| `make kubeconfig-cleanup` | Remove cluster context from local `~/.kube/config` |
+| `make clean` | Remove local temporary files and kubeconfig state files |
 | `make collections` | Install Ansible collections from `requirements.yml` |
 | `make debug-vars` | Print all current variable values and path status |
 

@@ -11,6 +11,7 @@ The playbook is organized into **5 sequential roles** that handle distinct phase
 3. **rke2_install** - Installs RKE2 binaries using online (script) or airgap (tarball) installation methods
 4. **rke2_cluster** - Forms the cluster by starting services in sequence (master → servers → agents) with token distribution
 5. **rke2_health_check** - Validates cluster health: API server responsiveness, node readiness, system pod status, and etcd health
+6. **Local kubeconfig setup** - Configures kubectl access on the operator's workstation (`~/.kube/config` by default)
 
 Each role can be executed independently using Ansible tags, enabling selective execution, debugging, and re-running specific phases without redeploying the entire cluster.
 
@@ -90,6 +91,31 @@ Each role can be executed independently using Ansible tags, enabling selective e
 
 **Tags:** `health`, `rke2`
 
+### Local kubeconfig setup
+**Purpose:** Configure kubectl access on the operator's local machine
+**Behavior controlled by `kubeconfig_local_mode`:**
+- `copy` (default) — Writes kubeconfig to `~/.kube/config`
+- `merge` — Merges new context into existing `~/.kube/config` with a unique name
+- `skip` — Does nothing (user manages their own `KUBECONFIG`)
+
+**Variables:**
+- `kubeconfig_local_mode` (default: `copy`)
+- `kubeconfig_context_name` (optional, used with `merge` mode)
+
+**Tags:** `kubeconfig`, `rke2`
+
+### Teardown
+
+When infrastructure is destroyed (`make infra-down`), the teardown task automatically:
+- **`copy` mode**: Removes `~/.kube/config`
+- **`merge` mode**: Deletes the context, cluster, and user entries from `~/.kube/config`
+
+You can also manually clean up without destroying infrastructure:
+
+```bash
+make kubeconfig-cleanup
+```
+
 ## Prerequisites
 
 Before running the playbook, ensure you have the following in addition to the [general ansible prereqs](../../README.md):
@@ -126,6 +152,7 @@ The role-based architecture supports selective execution using Ansible tags. Thi
 - `install` - RKE2 binary installation
 - `cluster` - Cluster formation and token distribution
 - `health` - Health checks and validation
+- `kubeconfig` - Configure local kubectl access
 - `rke2` - All RKE2-related tasks (shorthand for all above)
 
 **Examples:**
@@ -133,6 +160,9 @@ The role-based architecture supports selective execution using Ansible tags. Thi
 ```bash
 # Run only health checks (useful after cluster is already deployed)
 ansible-playbook -i ansible/rke2/default/inventory/inventory.yml ansible/rke2/default/rke2-playbook.yml --tags health
+
+# Re-run kubeconfig setup (e.g., to switch to merge mode)
+ansible-playbook -i ansible/rke2/default/inventory/inventory.yml ansible/rke2/default/rke2-playbook.yml --tags kubeconfig -e "kubeconfig_local_mode=merge"
 
 # Run only setup and config (skip installation and cluster formation)
 ansible-playbook -i ansible/rke2/default/inventory/inventory.yml ansible/rke2/default/rke2-playbook.yml --tags setup,config
@@ -155,6 +185,10 @@ kubeconfig_file: './kubeconfig.yaml'   # Used by: rke2_cluster, rke2_health_chec
 
 # Network Configuration (Required)
 cni: 'calico'                           # Used by: rke2_config (CNI plugin: calico, canal, cilium)
+
+# Kubeconfig setup after cluster creation
+kubeconfig_local_mode: 'copy'           # copy | merge | skip
+# kubeconfig_context_name: 'rke2-dev'  # Used when mode is "merge"
 
 # Infrastructure Variables (Required if not using Terraform)
 # These are automatically loaded from Terraform state if available

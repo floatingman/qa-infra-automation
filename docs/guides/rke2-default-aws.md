@@ -159,8 +159,10 @@ ansible-playbook \
 
 ## Step 5: Verify the Cluster
 
+By default, the playbook copies the kubeconfig to `~/.kube/config` so you can use `kubectl` directly:
+
 ```bash
-kubectl --kubeconfig ansible/rke2/default/kubeconfig.yaml get nodes -o wide
+kubectl get nodes -o wide
 ```
 
 Expected output (3 nodes, all `Ready`):
@@ -175,7 +177,62 @@ cp-1     Ready    control-plane,etcd,master   3m    v1.34.2+rke2r1    10.0.1.12
 Check all system pods are running:
 
 ```bash
-kubectl --kubeconfig ansible/rke2/default/kubeconfig.yaml get pods -A
+kubectl get pods -A
+```
+
+<details>
+<summary>Kubeconfig not working? Alternatives</summary>
+
+If you prefer not to modify `~/.kube/config`, the kubeconfig is also saved at the playbook location:
+
+```bash
+kubectl --kubeconfig ansible/rke2/default/kubeconfig.yaml get nodes
+```
+
+Or export it as an environment variable:
+
+```bash
+export KUBECONFIG=ansible/rke2/default/kubeconfig.yaml
+kubectl get nodes
+```
+
+</details>
+
+### Multi-cluster setup
+
+If you manage multiple clusters, set `kubeconfig_local_mode` in `vars.yaml` to merge the new context alongside your existing ones:
+
+```yaml
+kubeconfig_local_mode: "merge"             # Merges into ~/.kube/config
+kubeconfig_context_name: "rke2-staging"    # Optional: friendly name for the context
+```
+
+Then switch between clusters:
+
+```bash
+kubectl config use-context rke2-staging
+kubectl config use-context my-other-cluster
+```
+
+### Cleaning up
+
+When you tear down the cluster, the context is automatically removed from `~/.kube/config`:
+
+```bash
+make infra-down      # Destroys infra AND removes the kubeconfig context
+```
+
+To remove the context without destroying infrastructure (e.g., you destroyed infra manually):
+
+```bash
+make kubeconfig-cleanup
+```
+
+Or manually:
+
+```bash
+kubectl config delete-context rke2-staging
+kubectl config delete-cluster <cluster-name>
 ```
 
 ## Step 6: (Optional) Deploy Rancher

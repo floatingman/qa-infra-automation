@@ -134,3 +134,18 @@
         rke2_kubeconfig_path: "{{ playbook_dir }}/kubeconfig.yaml"
         rke2_server_flags: "{{ server_flags | default('') }}"
       tags: ['health', 'rke2']
+
+- hosts: localhost
+  name: Configure local kubectl access
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars.yaml
+  tasks:
+    - name: Setup local kubeconfig
+      ansible.builtin.include_tasks: "{{ playbook_dir | dirname | dirname }}/tasks/setup-local-kubeconfig.yml"
+      vars:
+        kubeconfig_src: "{{ playbook_dir }}/kubeconfig.yaml"
+        kubeconfig_local_mode: "{{ kubeconfig_local_mode | default('copy') }}"
+        kubeconfig_context_name: "{{ kubeconfig_context_name | default(omit) }}"
+      tags: ['kubeconfig', 'rke2']

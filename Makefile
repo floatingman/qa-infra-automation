@@ -119,6 +119,7 @@ help: ## Show this help message
 	@echo "  ping                Ping all hosts"
 	@echo "  validate            Validate configuration and prerequisites"
 	@echo "  verify              Verify supply chain integrity"
+	@echo "  kubeconfig-cleanup  Remove cluster context from local ~/.kube/config"
 	@echo "  clean               Clean local temporary files"
 	@echo ""
 	@echo "COMBINED WORKFLOWS:"
@@ -379,6 +380,15 @@ infra-down: check-tofu-dir ## Destroy infrastructure
 		[ "$$confirm" = "y" ] || exit 1; \
 	fi)
 	@echo ""
+	@echo "Cleaning up local kubeconfig..."
+	@if [ -f "$(KUBECONFIG_FILE)" ]; then \
+		ansible-playbook ansible/teardown-kubeconfig-playbook.yml \
+			-e "kubeconfig_src=$(CURDIR)/$(KUBECONFIG_FILE)" 2>/dev/null \
+			|| echo "  (kubeconfig cleanup skipped)"; \
+	else \
+		echo "  No kubeconfig file to clean up"; \
+	fi
+	@echo ""
 	@echo "Destroying..."
 	cd $(TOFU_DIR) && tofu destroy -var-file=terraform.tfvars -auto-approve
 	@echo ""
@@ -487,11 +497,20 @@ infra-nuke: ## Destroy ALL active infrastructure across all modules (end-of-day 
 		fi; \
 	done < <(find tofu -name "terraform.tfstate" 2>/dev/null | sort); \
 	echo ""; \
+	echo "Cleaning up all kubeconfigs..."; \
+	for state_file in $$(find ansible -name '.kubeconfig-state' 2>/dev/null); do \
+		kubeconfig=$$(dirname "$$state_file")/kubeconfig.yaml; \
+		if [ -f "$$kubeconfig" ]; then \
+			ansible-playbook ansible/teardown-kubeconfig-playbook.yml \
+				-e "kubeconfig_src=$$kubeconfig" 2>/dev/null || true; \
+		fi; \
+	done; \
+	echo ""; \
 	if [ "$$errors" -gt 0 ]; then \
 		echo "WARNING: $$errors module(s) failed to destroy. Check output above."; \
 		exit 1; \
 	else \
-		echo "All infrastructure destroyed."; \
+		echo "All infrastructure destroyed and kubeconfigs cleaned up."; \
 	fi
 
 # ============================================================================
@@ -592,6 +611,16 @@ inventory-graph: check-inventory ## Show inventory structure
 	@export ANSIBLE_CONFIG=$(ANSIBLE_DIR)/ansible.cfg; \
 	ansible-inventory -i $(INVENTORY) --graph
 
+.PHONY: kubeconfig-cleanup
+kubeconfig-cleanup: ## Remove cluster context from local ~/.kube/config
+	@echo "Cleaning up kubeconfig for $(DISTRO)/$(ENV)..."
+	@if [ -f "$(KUBECONFIG_FILE)" ]; then \
+		ansible-playbook ansible/teardown-kubeconfig-playbook.yml \
+			-e "kubeconfig_src=$(CURDIR)/$(KUBECONFIG_FILE)"; \
+	else \
+		echo "No kubeconfig found at $(KUBECONFIG_FILE)"; \
+	fi
+
 .PHONY: clean
 clean: ## Clean local temporary files
 	@echo "Cleaning local temporary files..."
@@ -600,6 +629,7 @@ clean: ## Clean local temporary files
 	rm -f /tmp/rke2-*.yaml
 	rm -f /tmp/k3s-*.yaml
 	rm -f *-upgrade-readiness-*.txt
+	find ansible -name '.kubeconfig-state' -delete 2>/dev/null || true
 	@echo "Local cleanup complete"
 
 # ============================================================================

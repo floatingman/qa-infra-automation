@@ -161,14 +161,63 @@ ansible-playbook \
 
 ## Step 4: Verify
 
+By default, the playbook copies the kubeconfig to `~/.kube/config` so you can use `kubectl` directly:
+
 ```bash
-kubectl --kubeconfig ansible/rke2/default/kubeconfig.yaml get nodes -o wide
+kubectl get nodes -o wide
 ```
 
 All nodes should show `Ready`. Check system pods:
 
 ```bash
-kubectl --kubeconfig ansible/rke2/default/kubeconfig.yaml get pods -A
+kubectl get pods -A
+```
+
+<details>
+<summary>Kubeconfig not working? Alternatives</summary>
+
+If you prefer not to modify `~/.kube/config`, the kubeconfig is also saved at the playbook location:
+
+```bash
+kubectl --kubeconfig ansible/rke2/default/kubeconfig.yaml get nodes
+```
+
+Or export it as an environment variable:
+
+```bash
+export KUBECONFIG=ansible/rke2/default/kubeconfig.yaml
+kubectl get nodes
+```
+
+</details>
+
+### Multi-cluster setup
+
+If you manage multiple clusters, set `kubeconfig_local_mode` in `vars.yaml` to merge the new context alongside your existing ones:
+
+```yaml
+kubeconfig_local_mode: "merge"             # Merges into ~/.kube/config
+kubeconfig_context_name: "rke2-my-cluster" # Optional: friendly name for the context
+```
+
+Then switch between clusters:
+
+```bash
+kubectl config use-context rke2-my-cluster
+```
+
+### Cleaning up
+
+When you tear down the cluster, the context is automatically removed:
+
+```bash
+make infra-down      # Destroys infra AND removes the kubeconfig context
+```
+
+To remove just the context without destroying infrastructure:
+
+```bash
+make kubeconfig-cleanup
 ```
 
 ## Step 5: (Optional) Deploy Rancher
