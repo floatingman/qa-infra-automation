@@ -146,6 +146,4 @@
       ansible.builtin.include_tasks: "{{ playbook_dir | dirname | dirname }}/tasks/setup-local-kubeconfig.yml"
       vars:
         kubeconfig_src: "{{ playbook_dir }}/kubeconfig.yaml"
-        kubeconfig_local_mode: "{{ kubeconfig_local_mode | default('copy') }}"
-        kubeconfig_context_name: "{{ kubeconfig_context_name | default(omit) }}"
       tags: ['kubeconfig', 'rke2']

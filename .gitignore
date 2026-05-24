@@ -36,3 +36,4 @@ backend.tf
 .lock
 tofu/aws/modules/cluster_nodes/inventory.yml
 plans/
+.kubeconfig-state
