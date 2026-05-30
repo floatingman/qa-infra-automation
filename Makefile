@@ -14,7 +14,9 @@ ENV          ?= default
 PROVIDER     ?= aws
 WORKSPACE    ?= default
 # Set AUTO_APPROVE=yes to skip interactive confirmation prompts (for CI use)
-AUTO_APPROVE ?= no
+AUTO_APPROVE      ?= no
+DELETE_WORKSPACES ?= no
+DRY_RUN           ?= no
 
 # Derived paths
 ANSIBLE_DIR := ansible/$(DISTRO)/$(ENV)
@@ -103,6 +105,7 @@ help: ## Show this help message
 	@echo "  infra-ls            List ALL active infrastructure across every module/workspace"
 	@echo "  infra-scan          Detailed scan of all infrastructure with resource counts"
 	@echo "  infra-nuke          Destroy ALL active infrastructure (end-of-day cleanup)"
+	@echo "  infra-nuke-all      Destroy ALL workspaces in current module (local & S3)"
 	@echo ""
 	@echo "CLUSTER (Ansible):"
 	@echo "  cluster             Install Kubernetes cluster"
@@ -136,6 +139,12 @@ help: ## Show this help message
 	@echo "Backend Configuration:"
 	@echo "  make backend-s3 BUCKET=my-bucket KEY=my-key REGION=us-east-1"
 	@echo "  make backend-local PATH=terraform.tfstate"
+	@echo ""
+	@echo "Workspace Nuke Examples:"
+	@echo "  make infra-nuke-all                                 # Interactive destroy all workspaces"
+	@echo "  make infra-nuke-all AUTO_APPROVE=yes                # CI: destroy all without prompts"
+	@echo "  make infra-nuke-all AUTO_APPROVE=yes DELETE_WORKSPACES=yes  # Destroy + delete workspaces"
+	@echo "  make infra-nuke-all DRY_RUN=yes                     # Dry run: show what would be destroyed"
 	@echo ""
 	@echo "Workspace Examples:"
 	@echo "  make workspace-list                          # List all workspaces"
@@ -393,6 +402,16 @@ infra-down: check-tofu-dir ## Destroy infrastructure
 	cd $(TOFU_DIR) && tofu destroy -var-file=terraform.tfvars -auto-approve
 	@echo ""
 	@echo "✓ Destroy complete"
+
+.PHONY: infra-nuke-all
+infra-nuke-all: check-tofu-dir ## Destroy ALL workspaces in current module (local & S3 backends)
+	@echo "Destroying all workspaces for $(TOFU_DIR)..."
+	cd $(TOFU_DIR) && $(CURDIR)/tofu/scripts/destroy-all-workspaces.sh \
+		$(if $(filter yes,$(AUTO_APPROVE)),--auto-approve) \
+		$(if $(filter yes,$(DELETE_WORKSPACES)),--delete-workspaces) \
+		$(if $(filter yes,$(DRY_RUN)),--dry-run) \
+		$(if $(VAR_FILE),--var-file $(VAR_FILE)) \
+		.
 
 .PHONY: infra-output
 infra-output: ## Show Tofu outputs

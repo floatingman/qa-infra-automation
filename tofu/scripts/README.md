@@ -2,6 +2,101 @@
 
 This directory contains centralized utility scripts for OpenTofu/Terraform operations across all modules.
 
+## destroy-all-workspaces.sh
+
+Destroy infrastructure in ALL tofu/terraform workspaces for a given module. Works with both **local state** and **S3 (remote)** backends — the backend type is auto-detected.
+
+### Usage
+
+```bash
+# Interactive — prompt before each workspace
+tofu/scripts/destroy-all-workspaces.sh tofu/aws/modules/cluster_nodes
+
+# CI-friendly — destroy everything without prompts and delete workspaces
+tofu/scripts/destroy-all-workspaces.sh --auto-approve --delete-workspaces \
+    tofu/aws/modules/cluster_nodes
+
+# Dry run — see what would be destroyed
+tofu/scripts/destroy-all-workspaces.sh --dry-run tofu/aws/modules/airgap
+
+# Custom var-file
+tofu/scripts/destroy-all-workspaces.sh --var-file custom.tfvars \
+    tofu/aws/modules/cluster_nodes
+```
+
+### Options
+
+| Flag                    | Description                                              |
+|-------------------------|----------------------------------------------------------|
+| `--auto-approve`        | Skip per-workspace confirmation prompts                  |
+| `--delete-workspaces`   | Delete each workspace after successful destroy           |
+| `--dry-run`             | Show what would be destroyed without running destroy     |
+| `--var-file FILE`       | Use a specific var-file (default: auto-detected)        |
+| `--help`                | Show help message                                        |
+
+### Make Integration
+
+```bash
+make infra-nuke-all                                    # Interactive
+make infra-nuke-all AUTO_APPROVE=yes                   # No prompts
+make infra-nuke-all AUTO_APPROVE=yes DELETE_WORKSPACES=yes  # Full cleanup
+make infra-nuke-all DRY_RUN=yes                        # Preview only
+make infra-nuke-all ENV=airgap                         # Target airgap module
+```
+
+### How It Works
+
+1. **Auto-detects backend** — reads `backend.tf` to determine S3 vs local state
+2. **Initializes tofu** if `.terraform/` is missing
+3. **Enumerates all workspaces** and counts resources in each
+4. **Displays a summary table** with workspace names, resource counts, and status
+5. **Destroys each workspace** with `tofu destroy -auto-approve`
+6. **Optionally deletes** empty workspaces after destroy
+7. **Restores original workspace** when finished
+
+### Safety Features
+
+- **Global confirmation** — requires `y` to proceed (unless `--auto-approve`)
+- **Per-workspace confirmation** — approve each workspace individually (unless `--auto-approve`)
+- **Skips empty workspaces** — only attempts destroy on workspaces with resources
+- **Protects `default` workspace** — cannot be deleted even with `--delete-workspaces`
+- **Dry run mode** — preview what will be destroyed without making changes
+- **Summary report** — shows destroyed / skipped / failed counts
+
+### S3 State Cleanup
+
+When using the S3 backend, the script **automatically removes orphaned state files** from S3 after each workspace is destroyed. This prevents stale state objects from accumulating in your S3 bucket.
+
+S3 state paths follow the standard OpenTofu/Terraform layout:
+
+```
+s3://<bucket>/<key>                         # default workspace
+s3://<bucket>/env:/<workspace>/<key>         # named workspaces
+```
+
+For example, with `key = "terraform.tfstate"` in `backend.tf`:
+
+```
+s3://jenkins-terraform-state-storage/terraform.tfstate                                    # default
+s3://jenkins-terraform-state-storage/env:/my-testing/terraform.tfstate                    # my-testing
+```
+
+The S3 cleanup:
+- Is triggered **only after a successful `tofu destroy`** — failed destroys leave state intact for recovery
+- Parses `backend.tf` automatically to discover the bucket, key, and region
+- Requires the `aws` CLI to be installed and configured with appropriate S3 permissions
+- Gracefully skips cleanup if `aws` CLI is not available (with a warning)
+- Works with `--dry-run` to preview which S3 paths would be deleted
+
+### Local vs S3 Backend
+
+The script works identically with both backends. Key differences:
+
+- **Local backend**: State stored in `terraform.tfstate.d/<workspace>/terraform.tfstate` within the module directory
+- **S3 backend**: State stored remotely in S3; `tofu workspace list/destroy` uses the S3 API
+
+No configuration changes are needed — the script reads your existing `backend.tf` to determine the backend type.
+
 ## new-workspace.sh
 
 Interactive workspace creation with validation and naming suggestions.
