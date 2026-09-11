@@ -27,11 +27,12 @@ Rancher chart, and waits for the deployment to become ready.
 | `rancher_private_hostname` / `rancher_hostname` | _(unset)_ | Hostname used in the Rancher ingress/UI |
 | `rancher_use_bundled_system_charts` | `true` | Use bundled system charts (`useBundledSystemChart`) |
 | `rancher_tls_source` | `rancher` | TLS source: `rancher`, `letsEncrypt`, or `secret` |
-| `cert_manager_version` | `""` | cert-manager chart version (SemVer, no `v`); empty = latest |
+| `cert_manager_version` | `""` | cert-manager chart version (SemVer, no `v`); empty = latest. When pinned (non-empty) in airgap, the cert-manager image preflight runs |
 | `rancher_system_default_registry` | `""` | **Airgap:** private registry passed to the chart as the top-level `systemDefaultRegistry` value (may include a project path, e.g. `host/proxycache`) |
 | `rancher_image_repository` | `rancher/rancher` | **Airgap:** image repo passed as the chart's `image.repository`, without the registry host |
-| `rancher_preflight_verify_image` | `true` | Verify the primary Rancher image is present in the private registry before installing |
+| `rancher_preflight_verify_image` | `true` | Verify the Rancher server image (and the cert-manager images, in airgap with a pinned `cert_manager_version`) is present in the private registry before installing |
 | `rancher_preflight_mode` | `api` | Preflight method: `api` (v2 manifest GET) or `pull` (`skopeo inspect`) |
+| `cert_manager_preflight_images` | `[controller, webhook, cainjector, startupapicheck]` | cert-manager images checked by the preflight; add `acmesolver` for `rancher_tls_source=letsEncrypt` |
 | `rancher_advanced_values` | `{}` | Extra Helm values merged into the Rancher release |
 
 ### `rancher_system_default_registry` (airgap)
@@ -77,6 +78,41 @@ Notes:
   the full `host/project` string **or** the bare host against `private_registry_configs`,
   and builds the v2 manifest URL as `https://<host>/v2/[<project>/]<repo>/manifests/<tag>`.
 - Leave empty for internet-connected deployments (the chart treats `""` as no registry).
+
+### cert-manager image preflight (airgap)
+
+The role installs the jetstack cert-manager chart with default values, so its pods
+reference `quay.io/jetstack/cert-manager-<component>:v<version>` **verbatim** — unlike
+the Rancher server image, they are not rewritten to the private registry. Kubelet
+resolves them through the node-level containerd mirror: the `quay.io` entry of
+`private_registry_mirrors`, typically a Harbor pull-through cache reached via the
+rewrite rules (e.g. `quay.io/*` → `host/quaycache/*`).
+
+When `rancher_system_default_registry` and `cert_manager_version` are both set, a
+second preflight (after the Rancher image one) verifies those images through the exact
+same resolution path: it takes the endpoint from the `quay.io` mirror entry, applies
+each rewrite rule to the `jetstack` repository path, and checks
+`<endpoint>/v2/<rewritten-path>/cert-manager-<component>:v<version>` for every image
+in `cert_manager_preflight_images` (chart version and image tag are identical for all
+cert-manager releases to date).
+
+Outcomes:
+
+- **200** — proceed.
+- **404** — fail fast: the image is not in the registry. Mirror it from an
+  internet-connected host (`docker pull <host>/<project>/cert-manager-<component>:<tag>`
+  pulls *through* the proxy and warms the cache), or — if your registry fetches on
+  demand — install `skopeo` and set `rancher_preflight_mode=pull` to exercise the real
+  pull path, or skip the check with `rancher_preflight_verify_image=false`.
+- **HTTP 5xx** (e.g. Harbor's `502 Bad Gateway`) — fail fast: the registry is up but
+  its pull-through fetch toward quay.io failed; kubelet would fail identically. Fix
+  the registry's quay.io proxy cache (egress / upstream config) before re-running.
+- **401/403/unreachable** — warn and continue (the check could not run).
+
+The check is skipped when `cert_manager_version` is empty (chart tag unknowable), when
+`rancher_tls_source=secret` (no cert-manager install), or when no `quay.io` mirror is
+configured (pods pull quay.io directly).
+
 
 ## Example
 

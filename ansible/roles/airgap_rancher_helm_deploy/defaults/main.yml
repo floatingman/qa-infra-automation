@@ -23,6 +23,18 @@ rancher_tls_source: "rancher"
 # Cert-manager chart version (SemVer without leading "v", e.g. 1.12.3). Leave empty to use latest.
 cert_manager_version: ""
 
+# cert-manager images the chart's default values pull from quay.io/jetstack. In airgap
+# these are what the cert-manager registry preflight checks (see
+# tasks/preflight_cert_manager.yml); kubelet resolves them through the "quay.io" entry
+# of private_registry_mirrors. acmesolver is only pulled when an ACME HTTP-01 challenge
+# actually runs — add it here if you deploy with rancher_tls_source=letsEncrypt and
+# want it verified too.
+cert_manager_preflight_images:
+  - controller
+  - webhook
+  - cainjector
+  - startupapicheck
+
 # Private registry configuration for airgap deployments.
 # Set rancher_system_default_registry to your private registry URL (without scheme,
 # e.g. "privateregistry.example.com:5000", or "host/proxycache" for a Harbor pull-through

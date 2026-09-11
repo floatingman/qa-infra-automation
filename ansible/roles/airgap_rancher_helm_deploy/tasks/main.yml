@@ -212,6 +212,9 @@
             - _rancher_preflight_use_skopeo | bool
             - _rancher_preflight_skopeo_resp.rc | default(1) != 0
 
+    - name: Preflight cert-manager images in the private registry (airgap fail-fast)
+      ansible.builtin.include_tasks: preflight_cert_manager.yml
+
     - name: Add Rancher Helm repository
       kubernetes.core.helm_repository:
         name: "{{ rancher_helm_chart_repo_name }}"

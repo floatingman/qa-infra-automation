@@ -1,0 +1,262 @@
+---
+# Preflight: verify the cert-manager images the chart will request are servable by
+# the airgap registry BEFORE Helm installs the chart.
+#
+# The role installs the jetstack chart with default values, so cert-manager pods
+# reference quay.io/jetstack/cert-manager-<component>:v<version> verbatim and rely on
+# the node-level containerd mirror (the "quay.io" entry in private_registry_mirrors,
+# typically a Harbor pull-through cache reached through its rewrite rules) to serve
+# them. A cold or broken cache only surfaces ~2 minutes later as ImagePullBackOff in
+# "Wait for cert-manager pods to be Running"; this check fails fast instead.
+#
+# The check mirrors how containerd resolves the pull:
+#   endpoint  = private_registry_mirrors["quay.io"].endpoints[0]
+#   path      = each rewrite rule applied to the "jetstack" repository path
+#   tag       = "v" + cert_manager_version (the chart's default image tag equals the
+#               chart version for every cert-manager release to date)
+- name: Preflight - verify cert-manager images exist in the private registry
+  when:
+    - rancher_tls_source | default('rancher') in ['letsEncrypt', 'rancher']
+    - rancher_system_default_registry | default('') | length > 0
+    - cert_manager_version | default('') | length > 0
+    - rancher_preflight_verify_image | default(true) | bool
+  block:
+    - name: Resolve the quay.io mirror entry for the cert-manager preflight
+      ansible.builtin.set_fact:
+        _cert_mgr_mirror: >-
+          {{ (private_registry_mirrors | default([])
+              | selectattr('registry', 'equalto', 'quay.io') | list | first) | default({}) }}
+
+    - name: Skip the cert-manager preflight when no quay.io mirror is configured
+      ansible.builtin.debug:
+        msg: >-
+          No "quay.io" entry in private_registry_mirrors; skipping the cert-manager image
+          preflight (pods would pull quay.io/jetstack/* directly, so there is nothing to check).
+      when: _cert_mgr_mirror | length == 0
+
+    - name: Check the cert-manager images behind the quay.io mirror
+      when: _cert_mgr_mirror | length > 0
+      block:
+        - name: Resolve the mirror endpoint for the cert-manager preflight
+          ansible.builtin.set_fact:
+            # registries.yaml convention allows a scheme on endpoints; keep it for
+            # request URLs and strip it to match private_registry_configs.
+            _cert_mgr_endpoint: "{{ _cert_mgr_mirror.endpoints | first | regex_replace('/+$', '') }}"
+
+        - name: Derive scheme and host from the mirror endpoint
+          ansible.builtin.set_fact:
+            _cert_mgr_scheme: "{{ _cert_mgr_endpoint.split('://')[0] if (_cert_mgr_endpoint is match('^https?://')) else 'https' }}"
+            _cert_mgr_host: "{{ _cert_mgr_endpoint | regex_replace('^https?://', '') }}"
+
+        # Apply the mirror's rewrite rules to the jetstack repository path the same way
+        # containerd does (e.g. "^(.*)": "quaycache/$1" -> "quaycache/jetstack").
+        # containerd replacements use Go/RE2 group references ("$1" or "${1}"), but
+        # Ansible's regex_replace goes through Python re.sub, which wants "\1" and
+        # would keep "$1" literal — so normalize the syntax first: "${N}" -> "$N",
+        # then "$" -> "\".
+        - name: Apply the mirror rewrite rules to the jetstack image path
+          vars:
+            # YAML "\\" is one backslash. Jinja string literals do NOT process
+            # backslash escapes, so an inline '\\' would pass two characters to
+            # re.sub (escaping into a literal) — take the single backslash from a
+            # YAML-quoted var instead.
+            _re_group_ref: "\\"
+          ansible.builtin.set_fact:
+            _cert_mgr_path: >-
+              {{ _cert_mgr_path | default('jetstack')
+                 | regex_replace(item.pattern,
+                    (item.replacement
+                       | regex_replace('\$\{(\d+)\}', '$' ~ _re_group_ref ~ '1')
+                       | replace('$', _re_group_ref))) }}
+          loop: "{{ _cert_mgr_mirror.rewrite | default([]) }}"
+
+        - name: Resolve the cert-manager image tag from the chart version
+          ansible.builtin.set_fact:
+            _cert_mgr_tag: "v{{ cert_manager_version | regex_replace('^[vV]', '') }}"
+
+        - name: Resolve registry auth config for the cert-manager preflight
+          ansible.builtin.set_fact:
+            # Match the endpoint host (optionally with port) or its bare-host part,
+            # the same loose matching the Rancher image preflight uses.
+            _cert_mgr_cfg: >-
+              {{ (private_registry_configs | default([])
+                  | selectattr('registry', 'in', ([_cert_mgr_host, _cert_mgr_host.split(':')[0]] | unique))
+                  | list | first) | default({}) }}
+
+        - name: Compute cert-manager preflight auth and TLS settings
+          ansible.builtin.set_fact:
+            # Empty strings (not omit) so later references cannot crash on an
+            # undefined fact; apply omit at the point of use instead.
+            _cert_mgr_user: "{{ (_cert_mgr_cfg.auth | default({})).username | default('') }}"
+            _cert_mgr_pass: "{{ (_cert_mgr_cfg.auth | default({})).password | default('') }}"
+            _cert_mgr_have_creds: "{{ ((_cert_mgr_cfg.auth | default({})).username | default('') | length > 0) }}"
+            # TLS verification only makes sense over https; an http endpoint (e.g. a
+            # test stub) must not fail cert validation.
+            _cert_mgr_validate_certs: >-
+              {{ (_cert_mgr_scheme == 'https') and
+                 (not ((_cert_mgr_cfg.tls | default({})).insecure_skip_verify | default(false) | bool)) }}
+
+        - name: Default the cert-manager preflight to api mode
+          ansible.builtin.set_fact:
+            _cert_mgr_use_skopeo: false
+
+        - name: Detect skopeo for cert-manager pull mode
+          ansible.builtin.command: skopeo --version
+          register: _cert_mgr_skopeo_ver
+          changed_when: false
+          failed_when: false
+          when: rancher_preflight_mode | default('api') == 'pull'
+
+        - name: Enable skopeo pull-check for cert-manager when available
+          ansible.builtin.set_fact:
+            _cert_mgr_use_skopeo: "{{ _cert_mgr_skopeo_ver.rc | default(1) == 0 }}"
+          when: rancher_preflight_mode | default('api') == 'pull'
+
+        - name: Warn when pull mode was requested but skopeo is missing
+          ansible.builtin.debug:
+            msg: >-
+              rancher_preflight_mode=pull but skopeo is not installed; falling back to api
+              mode for the cert-manager preflight. Note: api mode can report a false 404
+              against a cold Harbor proxy cache.
+          when:
+            - rancher_preflight_mode | default('api') == 'pull'
+            - not (_cert_mgr_use_skopeo | bool)
+
+        # --- API mode: registry v2 manifest GET (default; no extra deps) ---
+        - name: Query cert-manager image manifests in the private registry
+          ansible.builtin.uri:
+            url: "{{ _cert_mgr_scheme }}://{{ _cert_mgr_host }}/v2/{{ _cert_mgr_path }}/cert-manager-{{ item }}/manifests/{{ _cert_mgr_tag }}"
+            method: GET
+            timeout: 20
+            validate_certs: "{{ _cert_mgr_validate_certs | bool }}"
+            url_username: "{{ _cert_mgr_user if (_cert_mgr_have_creds | bool) else omit }}"
+            url_password: "{{ _cert_mgr_pass if (_cert_mgr_have_creds | bool) else omit }}"
+            force_basic_auth: "{{ _cert_mgr_have_creds | bool }}"
+            headers:
+              Accept: >-
+                application/vnd.oci.image.manifest.v1+json,
+                application/vnd.docker.distribution.manifest.v2+json,
+                application/vnd.docker.distribution.manifest.list.v2+json
+            status_code: [200, 401, 403, 404]
+          loop: "{{ cert_manager_preflight_images }}"
+          loop_control:
+            label: "cert-manager-{{ item }}:{{ _cert_mgr_tag }}"
+          register: _cert_mgr_resp
+          failed_when: false
+          when: not (_cert_mgr_use_skopeo | bool)
+
+        - name: Collect missing, upstream-failed, and indeterminate cert-manager checks
+          ansible.builtin.set_fact:
+            _cert_mgr_ok: "{{ _cert_mgr_resp.results
+                | selectattr('status', 'defined') | selectattr('status', 'equalto', 200)
+                | map(attribute='item') | list }}"
+            _cert_mgr_missing: "{{ _cert_mgr_resp.results
+                | selectattr('status', 'defined') | selectattr('status', 'equalto', 404)
+                | map(attribute='item') | list }}"
+            _cert_mgr_upstream_failed: "{{ _cert_mgr_resp.results
+                | selectattr('status', 'defined') | selectattr('status', 'ge', 500)
+                | map(attribute='item') | list }}"
+            _cert_mgr_indeterminate: "{{ (_cert_mgr_resp.results
+                | rejectattr('status', 'defined') | map(attribute='item') | list)
+                + (_cert_mgr_resp.results
+                | selectattr('status', 'defined') | selectattr('status', 'in', [401, 403])
+                | map(attribute='item') | list) }}"
+          when: not (_cert_mgr_use_skopeo | bool)
+
+        - name: Fail fast when cert-manager images are missing from the private registry
+          ansible.builtin.fail:
+            msg: >-
+              cert-manager images missing from the private registry (HTTP 404):
+              {{ _cert_mgr_missing | join(', ') }}. The pods reference
+              quay.io/jetstack/cert-manager-*:{{ _cert_mgr_tag }} verbatim and kubelet resolves
+              them through the quay.io mirror ({{ _cert_mgr_host }}/{{ _cert_mgr_path }}/cert-manager-*),
+              so the deploy would stall in ImagePullBackOff waiting for the pods. Mirror the
+              images from an internet-connected host, e.g.
+              docker pull {{ _cert_mgr_host }}/{{ _cert_mgr_path }}/cert-manager-<component>:{{ _cert_mgr_tag }};
+              or, if the registry fetches on demand, install skopeo and set
+              rancher_preflight_mode=pull; or skip the check with
+              rancher_preflight_verify_image=false.
+          when:
+            - not (_cert_mgr_use_skopeo | bool)
+            - _cert_mgr_missing | default([]) | length > 0
+
+        - name: Fail fast when the registry upstream fetch is broken
+          ansible.builtin.fail:
+            msg: >-
+              Private registry returned HTTP 5xx for cert-manager images
+              ({{ _cert_mgr_upstream_failed | join(', ') }}) at
+              {{ _cert_mgr_host }}/v2/{{ _cert_mgr_path }}/cert-manager-*:{{ _cert_mgr_tag }}.
+              The registry is up but its pull-through fetch toward quay.io failed, and kubelet
+              pulls will fail the same way. Fix the registry's quay.io proxy cache (egress or
+              upstream registry config) or pre-mirror the images, then re-run.
+          when:
+            - not (_cert_mgr_use_skopeo | bool)
+            - _cert_mgr_upstream_failed | default([]) | length > 0
+
+        - name: Warn when cert-manager image checks were inconclusive
+          ansible.builtin.debug:
+            msg: >-
+              WARNING: could not confirm cert-manager images
+              ({{ _cert_mgr_indeterminate | join(', ') }}) — auth error or registry
+              unreachable. Continuing; the deploy may still fail at image pull time if the
+              registry cannot serve them.
+          when:
+            - not (_cert_mgr_use_skopeo | bool)
+            - _cert_mgr_indeterminate | default([]) | length > 0
+
+        - name: Confirm cert-manager images found in the private registry
+          ansible.builtin.debug:
+            msg: >-
+              OK: {{ _cert_mgr_ok | default([]) | length }}/{{ cert_manager_preflight_images | length }}
+              cert-manager images resolvable at
+              {{ _cert_mgr_host }}/v2/{{ _cert_mgr_path }}/cert-manager-*:{{ _cert_mgr_tag }}.
+          when:
+            - not (_cert_mgr_use_skopeo | bool)
+            - _cert_mgr_missing | default([]) | length == 0
+            - _cert_mgr_upstream_failed | default([]) | length == 0
+
+        # --- Pull mode: skopeo inspect (same path as a real pull; warms the cache) ---
+        - name: Pull-check cert-manager images with skopeo
+          ansible.builtin.command:
+            cmd: >-
+              skopeo inspect
+              --tls-verify={{ _cert_mgr_validate_certs | bool | lower }}
+              {{ ('--creds=' ~ _cert_mgr_user ~ ':' ~ _cert_mgr_pass) if (_cert_mgr_have_creds | bool) else '' }}
+              docker://{{ _cert_mgr_host }}/{{ _cert_mgr_path }}/cert-manager-{{ item }}:{{ _cert_mgr_tag }}
+          loop: "{{ cert_manager_preflight_images }}"
+          loop_control:
+            label: "cert-manager-{{ item }}:{{ _cert_mgr_tag }}"
+          register: _cert_mgr_skopeo_resp
+          changed_when: false
+          failed_when: false
+          when: _cert_mgr_use_skopeo | bool
+
+        - name: Collect cert-manager images skopeo could not resolve
+          ansible.builtin.set_fact:
+            _cert_mgr_skopeo_failed: "{{ _cert_mgr_skopeo_resp.results
+                | selectattr('rc', 'defined') | rejectattr('rc', 'equalto', 0)
+                | map(attribute='item') | list }}"
+          when: _cert_mgr_use_skopeo | bool
+
+        - name: Fail if skopeo cannot resolve cert-manager images
+          ansible.builtin.fail:
+            msg: >-
+              cert-manager images not resolvable through the quay.io mirror
+              ({{ _cert_mgr_skopeo_failed | join(', ') }}) at
+              {{ _cert_mgr_host }}/{{ _cert_mgr_path }}/cert-manager-*:{{ _cert_mgr_tag }}.
+              Mirror them into the registry (or ensure the proxy-cache project path and
+              upstream are correct), or skip the check with
+              rancher_preflight_verify_image=false.
+          when:
+            - _cert_mgr_use_skopeo | bool
+            - _cert_mgr_skopeo_failed | default([]) | length > 0
+
+        - name: Confirm cert-manager images resolvable via skopeo
+          ansible.builtin.debug:
+            msg: >-
+              OK: {{ cert_manager_preflight_images | length - (_cert_mgr_skopeo_failed | default([]) | length) }}/{{
+              cert_manager_preflight_images | length }} cert-manager images resolvable via
+              skopeo through the quay.io mirror (pull path verified).
+          when:
+            - _cert_mgr_use_skopeo | bool
+            - _cert_mgr_skopeo_failed | default([]) | length == 0
